@@ -280,23 +280,16 @@ function createBurstParticles(): BurstParticle[] {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function EidMubarak() {
   const [clicked, setClicked] = useState(false);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [particles, setParticles] = useState<BurstParticle[]>([]);
   const playerRef = useRef<HTMLIFrameElement | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const musicRequestedRef = useRef(false);
+  const musicPlayingRef = useRef(false);
+  const playerLoadedRef = useRef(false);
 
   // YouTube video ID
-  const YT_ID = "DEo3JEvj0Rc";
-
-  useEffect(() => {
-    return () => {
-      const audioContext = audioContextRef.current;
-      audioContextRef.current = null;
-
-      if (audioContext && audioContext.state !== "closed") {
-        void audioContext.close();
-      }
-    };
-  }, []);
+  const YT_ID = "8q92-mgZaNw";
+  const playerSrc = `https://www.youtube.com/embed/${YT_ID}?enablejsapi=1&playsinline=1&controls=0&rel=0&loop=1&playlist=${YT_ID}`;
 
   useEffect(() => {
     if (particles.length === 0) {
@@ -307,75 +300,70 @@ export default function EidMubarak() {
     return () => clearTimeout(timeoutId);
   }, [particles]);
 
-  const playClickSound = () => {
-    if (
-      typeof window === "undefined" ||
-      typeof window.AudioContext === "undefined"
-    ) {
+  const sendPlayerCommand = (func: string, args: unknown[] = []) => {
+    playerRef.current?.contentWindow?.postMessage(
+      JSON.stringify({ event: "command", func, args }),
+      "*",
+    );
+  };
+
+  const setMusicPlayingState = (value: boolean) => {
+    musicPlayingRef.current = value;
+    setIsMusicPlaying(value);
+  };
+
+  const playMusic = () => {
+    if (!playerLoadedRef.current) {
       return;
     }
 
-    const audioContext = audioContextRef.current ?? new window.AudioContext();
-    audioContextRef.current = audioContext;
+    sendPlayerCommand("unMute");
+    sendPlayerCommand("setVolume", [100]);
+    sendPlayerCommand("playVideo");
+  };
 
-    if (audioContext.state === "suspended") {
-      void audioContext.resume();
+  const pauseMusic = () => {
+    if (!playerLoadedRef.current) {
+      return;
     }
 
-    const startAt = audioContext.currentTime + 0.02;
-    const notes = [
-      { frequency: 659.25, offset: 0, length: 0.32, volume: 0.14 },
-      { frequency: 783.99, offset: 0.12, length: 0.34, volume: 0.15 },
-      { frequency: 987.77, offset: 0.26, length: 0.52, volume: 0.18 },
-    ];
+    sendPlayerCommand("pauseVideo");
+  };
 
-    notes.forEach(({ frequency, offset, length, volume }) => {
-      const mainOscillator = audioContext.createOscillator();
-      const shimmerOscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      const noteStart = startAt + offset;
-
-      mainOscillator.type = "triangle";
-      mainOscillator.frequency.setValueAtTime(frequency, noteStart);
-
-      shimmerOscillator.type = "sine";
-      shimmerOscillator.frequency.setValueAtTime(frequency * 2, noteStart);
-
-      gainNode.gain.setValueAtTime(0.0001, noteStart);
-      gainNode.gain.exponentialRampToValueAtTime(volume, noteStart + 0.02);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, noteStart + length);
-
-      mainOscillator.connect(gainNode);
-      shimmerOscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      mainOscillator.start(noteStart);
-      shimmerOscillator.start(noteStart);
-      mainOscillator.stop(noteStart + length);
-      shimmerOscillator.stop(noteStart + length);
+  const scheduleMusicStart = () => {
+    [0, 160, 420].forEach((delay) => {
+      window.setTimeout(playMusic, delay);
     });
+  };
 
-    const bassOscillator = audioContext.createOscillator();
-    const bassGain = audioContext.createGain();
+  const handlePlayerLoad = () => {
+    playerLoadedRef.current = true;
 
-    bassOscillator.type = "sine";
-    bassOscillator.frequency.setValueAtTime(196, startAt);
-
-    bassGain.gain.setValueAtTime(0.0001, startAt);
-    bassGain.gain.exponentialRampToValueAtTime(0.07, startAt + 0.04);
-    bassGain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.58);
-
-    bassOscillator.connect(bassGain);
-    bassGain.connect(audioContext.destination);
-
-    bassOscillator.start(startAt);
-    bassOscillator.stop(startAt + 0.58);
+    if (musicRequestedRef.current && musicPlayingRef.current) {
+      scheduleMusicStart();
+    }
   };
 
   const handleClick = () => {
-    playClickSound();
+    musicRequestedRef.current = true;
+    setMusicPlayingState(true);
     setParticles(createBurstParticles());
     setClicked(true);
+    scheduleMusicStart();
+  };
+
+  const handleMusicToggle = () => {
+    const nextState = !musicPlayingRef.current;
+
+    setMusicPlayingState(nextState);
+
+    if (nextState) {
+      musicRequestedRef.current = true;
+      scheduleMusicStart();
+      return;
+    }
+
+    pauseMusic();
   };
 
   return (
@@ -451,37 +439,54 @@ export default function EidMubarak() {
           filter: brightness(1.1);
         }
 
-        /* Responsive image container */
+        /* WhatsApp-style profile image */
+        .eid-profile-shell {
+          width: min(72vw, 260px);
+          margin: 0 auto;
+          padding: 0.45rem;
+          border-radius: 9999px;
+          background: linear-gradient(145deg, rgba(255, 240, 184, 0.18), rgba(201, 162, 39, 0.08));
+          box-shadow:
+            0 0 0 1px rgba(201,162,39,0.22),
+            0 0 34px rgba(201,162,39,0.16);
+        }
         .eid-img-wrapper {
           position: relative;
           width: 100%;
-          padding-top: 75%;
-          border-radius: 1rem;
+          aspect-ratio: 1 / 1;
+          border-radius: 9999px;
           overflow: hidden;
           box-shadow:
             0 0 0 1px rgba(201,162,39,0.35),
             0 0 30px rgba(201,162,39,0.2),
             0 0 60px rgba(201,162,39,0.08);
         }
-        @media (min-width: 640px) {
-          .eid-img-wrapper { padding-top: 56.25%; }
-        }
         .eid-img-wrapper::before {
           content: '';
           position: absolute;
           inset: 0;
-          border-radius: 1rem;
+          border-radius: inherit;
           border: 1px solid rgba(201,162,39,0.4);
           z-index: 2;
           pointer-events: none;
         }
         .eid-img-wrapper img {
-          position: absolute;
-          inset: 0;
           width: 100%;
           height: 100%;
           object-fit: cover;
           display: block;
+        }
+
+        .music-toggle-btn {
+          border: 1px solid rgba(201,162,39,0.36);
+          background: rgba(255,255,255,0.06);
+          color: #f7e7b7;
+          box-shadow: 0 0 24px rgba(201,162,39,0.12);
+          backdrop-filter: blur(10px);
+        }
+        .music-toggle-btn:hover {
+          background: rgba(255,255,255,0.12);
+          filter: brightness(1.05);
         }
 
         /* Walking goat across screen after click */
@@ -500,6 +505,16 @@ export default function EidMubarak() {
           z-index: 5;
           pointer-events: none;
           animation: goatWalk 16s linear 3s forwards;
+        }
+
+        .hidden-player {
+          position: fixed;
+          width: 1px;
+          height: 1px;
+          opacity: 0;
+          pointer-events: none;
+          bottom: 0;
+          left: 0;
         }
       `}</style>
 
@@ -571,6 +586,15 @@ export default function EidMubarak() {
             />
           ))}
         </div>
+
+        <iframe
+          ref={playerRef}
+          className="hidden-player"
+          src={playerSrc}
+          allow="autoplay; encrypted-media"
+          title="Eid Nasheed background music"
+          onLoad={handlePlayerLoad}
+        />
 
         {/* ── Main content ── */}
         <main className="relative z-10 flex flex-col items-center px-4 py-16 w-full max-w-2xl mx-auto text-center">
@@ -662,34 +686,41 @@ export default function EidMubarak() {
                 Eid ul Adha Mubarak
               </h2>
 
-              {/* Wish message card */}
-              <div
-                className="w-full rounded-2xl p-6 sm:p-8 text-center"
-                style={{
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(201,162,39,0.22)",
-                  backdropFilter: "blur(10px)",
-                }}
-              >
-                <p className="font-raleway text-amber-100/80 leading-relaxed font-light text-sm sm:text-base">
-                  May the divine blessings of{" "}
-                  <span className="text-amber-300 font-semibold">Allah</span>{" "}
-                  bring you peace, happiness and prosperity.
-                  <br className="hidden sm:block" />
-                  <br className="hidden sm:block" />
-                  May Allah accept your{" "}
-                  <span className="text-amber-300 font-semibold">
-                    sacrifices
-                  </span>
-                  , prayers and good deeds on this most blessed day.
-                  <br className="hidden sm:block" />
-                  <br className="hidden sm:block" />
-                  Wishing you and your loved ones a joyful and blessed{" "}
-                  <span className="text-amber-300 font-semibold">
-                    Eid ul Adha
-                  </span>
-                  .
-                </p>
+              <div className="w-full image-reveal flex flex-col items-center">
+                <div className="eid-profile-shell">
+                  <div className="eid-img-wrapper">
+                    <img
+                      src="/download.png"
+                      alt="Shaik Khaleel Eid wishes portrait"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleMusicToggle}
+                  className="music-toggle-btn mt-5 rounded-full px-6 py-3 font-cinzel text-xs sm:text-sm tracking-[0.2em] uppercase transition-transform active:scale-95 cursor-pointer"
+                >
+                  {isMusicPlaying
+                    ? "Pause Takbeer-e-Tashreeq"
+                    : "Play Takbeer-e-Tashreeq"}
+                </button>
+
+                <div
+                  className="mt-4 w-full max-w-md rounded-2xl p-5 sm:p-6"
+                  style={{
+                    background: "rgba(9,11,22,0.68)",
+                    border: "1px solid rgba(201,162,39,0.28)",
+                    boxShadow: "0 0 32px rgba(201,162,39,0.08)",
+                  }}
+                >
+                  <p className="font-cinzel text-amber-100 text-sm sm:text-base tracking-[0.2em] uppercase">
+                    Eid Wishes From Shaik Khaleel
+                  </p>
+                  <p className="mt-3 font-raleway text-amber-100/75 text-sm sm:text-base leading-relaxed">
+                    Wishing you peace, joy and barakah this Eid.
+                  </p>
+                </div>
               </div>
 
               {/* Three goats row */}
@@ -711,21 +742,6 @@ export default function EidMubarak() {
                   "May Allah accept it from us and from you"
                 </p>
               </div>
-
-              {/* Hidden YouTube iframe — loop=1 + playlist for infinite repeat */}
-              <iframe
-                ref={playerRef}
-                style={{
-                  position: "absolute",
-                  width: 0,
-                  height: 0,
-                  opacity: 0,
-                  pointerEvents: "none",
-                }}
-                src={`https://www.youtube.com/embed/${YT_ID}?autoplay=1&loop=1&playlist=${YT_ID}&enablejsapi=1&controls=0&rel=0`}
-                allow="autoplay; encrypted-media"
-                title="Eid Nasheed background music"
-              />
             </div>
           )}
         </main>
